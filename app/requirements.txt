@@ -21,7 +21,6 @@ isort==5.12.0
 
 # Бот и API интеграции
 aiogram>=2.20.0
-aiohttp>=3.8.1
 aioschedule>=0.5.2
 aiopayok>=0.2.1
 translatepy>=2.3
