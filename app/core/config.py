@@ -19,5 +19,5 @@ payokapiid = '123'
 payokshopid= 3222
 
 # Version and github url
-version = '2.0.1'
+version = '2.1.0'
 github_url = 'https://github.com/l1v0n1/neurobalbes-telegram'

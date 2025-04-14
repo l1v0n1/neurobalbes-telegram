@@ -9,10 +9,15 @@ import asyncio
 import sqlite3
 import uuid
 import json
+import glob
+import pathlib
+import hashlib
+import sys
+import aiohttp
 from datetime import datetime, timedelta
+import aiogram.utils.exceptions
 
 # Обработка данных и анализ
-import sys
 # Добавляем корневую директорию в путь для импорта
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -24,7 +29,8 @@ import numpy as np
 # Работа с изображениями и медиа
 from PIL import Image, ImageDraw, ImageFont
 from gtts import gTTS
-from app.media.demotivators import Demotivator, Quote
+# Импортируем новую библиотеку вместо старой
+from app.simpledemotivators_2_0 import Demotivator, Quote, TextImage
 from app.media.help_utils import images_to_grid
 
 # Телеграм и API интеграции
@@ -171,29 +177,36 @@ async def premium(message: types.Message):
 
 @dp.callback_query_handler(text="buy_premium")
 async def buy_premium(call: types.CallbackQuery):
-	number = random.randint(1, 9999999999999)
-	history = await payok.get_transactions()
-	payments = [i.payment_id for i in history]
-	if number not in payments:
-		id = number
-	else:
-		id = random.randint(number + 1, 9999999999999)
-	payment = await payok.create_pay(
-		config.premiumamount,
-		id,
-		desc="Премиум подписка",
-		success_url="https://t.me/neurobalbesbot",
-	)
-	keyboard = types.InlineKeyboardMarkup(row_width=1)
-	keyboard.add(
-		types.InlineKeyboardButton("Оплатить", payment),
-		types.InlineKeyboardButton("Проверить оплату", callback_data=f"check_{id}"),
-		types.InlineKeyboardButton("Отмена", callback_data="cancel_prem"),
-	)
-	await call.message.answer(
-		'Приобретение премиум подписки\nИспользуйте кнопку "Оплатить", чтобы перейти к форме оплаты, после оплаты нажмите на кнопку "Проверить оплату"',
-		reply_markup=keyboard,
-	)
+	try:
+		number = random.randint(1, 9999999999999)
+		history = await payok.get_transactions()
+		payments = [i.payment_id for i in history]
+		if number not in payments:
+			id = number
+		else:
+			id = random.randint(number + 1, 9999999999999)
+		payment = await payok.create_pay(
+			config.premiumamount,
+			id,
+			desc="Премиум подписка",
+			success_url="https://t.me/neurobalbesbot",
+		)
+		keyboard = types.InlineKeyboardMarkup(row_width=1)
+		keyboard.add(
+			types.InlineKeyboardButton("Оплатить", payment),
+			types.InlineKeyboardButton("Проверить оплату", callback_data=f"check_{id}"),
+			types.InlineKeyboardButton("Отмена", callback_data="cancel_prem"),
+		)
+		await call.message.answer(
+			'Приобретение премиум подписки\nИспользуйте кнопку "Оплатить", чтобы перейти к форме оплаты, после оплаты нажмите на кнопку "Проверить оплату"',
+			reply_markup=keyboard,
+		)
+	except aiohttp.ClientResponseError as e:
+		logging.error(f"PayOK API error: {e}", exc_info=True)
+		await call.message.answer("Ошибка сервера оплаты. Пожалуйста, попробуйте позже.")
+	except Exception as e:
+		logging.error(f"Error in buy_premium: {e}", exc_info=True)
+		await call.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 
 @dp.callback_query_handler(lambda call: call.data.startswith("check_"))
@@ -217,7 +230,11 @@ async def check_payment(call: types.CallbackQuery):
 				await call.answer("Чат уже премиум", True)
 		else:
 			await call.answer("Не оплачено", True)
+	except aiohttp.ClientResponseError as e:
+		logging.error(f"PayOK API error in check_payment: {e}", exc_info=True)
+		await call.answer("Ошибка сервера оплаты. Попробуйте позже.", True)
 	except Exception as e:
+		logging.error(f"Error in check_payment: {e}", exc_info=True)
 		await call.answer("Не оплачено", True)
 
 
@@ -283,7 +300,42 @@ async def private_handler(message: types.Message):
 
 @dp.message_handler(commands="help", chat_type=["group", "supergroup"])
 async def help_message(message: types.Message):
-	await message.answer("F.A.Q", reply_markup=keyboard.help)
+	help_text = """
+<b>📋 Команды бота Нейробалбес:</b>
+
+<b>🤖 Основные команды:</b>
+/help - список команд
+/info - информация о боте
+/settings - настройки бота
+/premium - узнать премиум статус чата
+
+<b>📝 Генерация текста:</b>
+/gen - сгенерировать случайную фразу
+/gensyntax - сгенерировать текст с правильным синтаксисом
+/genlong - сгенерировать длинный текст
+/genpoem - сгенерировать стихотворение
+/genbugurt - сгенерировать бугурт
+/genanek - сгенерировать анекдот
+/gendialogue - сгенерировать диалог
+/gensymbols [число] - сгенерировать текст определенной длины
+/cont [текст] - продолжить фразу
+/choice [A или B] - выбрать один из вариантов
+
+<b>🔊 Голосовые сообщения:</b>
+/genvoice - сгенерировать голосовое сообщение
+
+<b>📊 Опросы:</b>
+/genpoll - сгенерировать случайный опрос
+
+<b>🖼 Изображения и мемы:</b>
+/gendem - сгенерировать демотиватор
+/genmem - сгенерировать мем
+/quote - создать цитату (в ответ на сообщение)
+
+<b>🗑 Управление данными:</b>
+/wipe - очистить базу данных чата
+"""
+	await message.answer(help_text, parse_mode="HTML")
 
 
 @dp.message_handler(commands=["info"])
@@ -303,6 +355,12 @@ async def info(message: types.Message):
 		stickers_count = len(database["stickers"])
 		blocked_stickers = len(database["blockedstickers"])
 		
+		# Получаем информацию о счетчике сообщений
+		message_counter = database.get("textleft", 0)
+		messages_left = 20 - message_counter
+		if messages_left <= 0:
+			messages_left = 20
+		
 		# Получаем общую статистику по всем чатам
 		total_chats = db.get_total_chats_count()
 		total_phrases = db.get_total_phrases_count()
@@ -321,7 +379,8 @@ async def info(message: types.Message):
 			f"📝 Фраз в базе: {phrases_count}\n"
 			f"🖼 Изображений: {photos_count}\n"
 			f"🎭 Стикеров: {stickers_count}\n"
-			f"🚫 Заблокировано стикеров: {blocked_stickers}\n\n"
+			f"🚫 Заблокировано стикеров: {blocked_stickers}\n"
+			f"🔄 Осталось {messages_left} сообщений до генерации мема/демотиватора\n\n"
 			f"🌐 <b>Общая статистика:</b>\n"
 			f"👥 Всего чатов: {total_chats}\n"
 			f"💬 Всего фраз: {total_phrases}\n\n"
@@ -633,86 +692,73 @@ async def generate_demotivator(message: types.Message):
 				random_bottom_text = await generator.generate_phrase(
 					validators=[validators.words_count(minimal=1, maximal=5)]
 				)
+				
+				# Создаем временную директорию
+				temp_dir = await init_temp_directories()
+				
+				# Подготавливаем идентификаторы для файлов
 				random_picture = random.choice(pictures)
+				random_filename = get_temp_filename(prefix="input", extension="jpg")
+				result_prefix = get_temp_filename(prefix="result", extension="")
+				
+				# Скачиваем изображение
 				dw = await bot.download_file_by_id(random_picture)
-				random_filename = (
-					f"randomimg_{random.randint(0, 10000000000000000000000000)}.jpg"
-				)
-				with open(random_filename, "wb") as f:
+				random_filepath = os.path.join(temp_dir, random_filename)
+				with open(random_filepath, "wb") as f:
 					f.write(dw.read())
 				
-				# Validate the image file
+				# Проверяем изображение
 				valid_image = False
 				try:
-					# Try to open the image with PIL to validate it
-					with Image.open(random_filename) as img:
-						# Force load the image to check if it's valid
+					with Image.open(random_filepath) as img:
 						img.load()
-						logging.info(f"Image validated successfully: {random_filename}, size: {img.size}, format: {img.format}")
+						logging.info(f"Image validated successfully: {random_filepath}, size: {img.size}, format: {img.format}")
 						valid_image = True
 				except Exception as img_error:
 					logging.error(f"Invalid image file: {img_error}")
-					if os.path.exists(random_filename):
-						os.remove(random_filename)
+					if os.path.exists(random_filepath):
+						os.remove(random_filepath)
 					await message.reply("Не удалось создать демотиватор: некорректное изображение.")
 				
 				if valid_image:
-					dem_filename = (
-						f"result_{random.randint(0, 10000000000000000000000000)}.jpg"
-					)
-					ldd = random.randint(1, 2)
-					if ldd == 1:
-						try:
-							dem = Demotivator(
-								random_text.lower(), random_bottom_text.lower()
-							)
-							dem.create(
-								random_filename,
-								watermark=bot_username,
-								result_filename=dem_filename,
-								delete_file=False,  # Changed to False to handle deletion ourselves
-							)
-							if os.path.exists(dem_filename):
-								with open(dem_filename, "rb") as photo:
-									await bot.send_photo(message.chat.id, photo)
-								# Remove the file after sending
-								if os.path.exists(dem_filename):
-									os.remove(dem_filename)
-							else:
-								await message.reply("Не удалось создать демотиватор. Попробуйте еще раз.")
-						except Exception as e:
-							logging.error(f"Error creating demotivator: {e}", exc_info=True)
-							# Only try to remove if the file exists
-							if os.path.exists(dem_filename):
-								os.remove(dem_filename)
-							await message.reply("Произошла ошибка при создании демотиватора.")
-					elif ldd == 2:
-						try:
-							dem = Demotivator(random_text.lower(), "")
-							dem.create(
-								random_filename,
-								watermark=bot_username,
-								result_filename=dem_filename,
-								delete_file=False,  # Changed to False to handle deletion ourselves
-							)
-							if os.path.exists(dem_filename):
-								with open(dem_filename, "rb") as photo:
-									await bot.send_photo(message.chat.id, photo)
-								# Remove the file after sending
-								if os.path.exists(dem_filename):
-									os.remove(dem_filename)
-							else:
-								await message.reply("Не удалось создать демотиватор. Попробуйте еще раз.")
-						except Exception as e:
-							logging.error(f"Error creating demotivator: {e}", exc_info=True)
-							# Only try to remove if the file exists
-							if os.path.exists(dem_filename):
-								os.remove(dem_filename)
-							await message.reply("Произошла ошибка при создании демотиватора.")
+					# Создаем демотиватор используя новую библиотеку
+					style = random.randint(1, 2)
 					
-					# Clean up the random image file if it still exists
-					if os.path.exists(random_filename):
-						os.remove(random_filename)
+					try:
+						# В зависимости от стиля создаем демотиватор с одним или двумя текстовыми полями
+						if style == 1:
+							dem = Demotivator(random_text.lower(), random_bottom_text.lower())
+						else:
+							dem = Demotivator(random_text.lower(), "")
+						
+						# Создаем демотиватор асинхронно
+						await dem.create(
+							folder_name=temp_dir, 
+							avatar_name=random_filename, 
+							result_filename=result_prefix,
+							watermark=bot_username,
+						)
+						
+						# Полный путь к результату
+						dem_filepath = os.path.join(temp_dir, f"{result_prefix}_dem.jpg")
+						
+						# Отправляем результат, если файл существует
+						if os.path.exists(dem_filepath):
+							with open(dem_filepath, "rb") as photo:
+								await bot.send_photo(message.chat.id, photo)
+							# Удаляем результат
+							os.remove(dem_filepath)
+						else:
+							await message.reply("Не удалось создать демотиватор. Попробуйте еще раз.")
+							
+					except Exception as e:
+						logging.error(f"Error creating demotivator: {e}", exc_info=True)
+						await message.reply("Произошла ошибка при создании демотиватора.")
+					
+					# Удаляем исходное изображение
+					if os.path.exists(random_filepath):
+						os.remove(random_filepath)
+						
 			elif message.chat.id in dialogs and time.time() <= dialogs[message.chat.id]:
 				await message.answer("слишком рано\nподожди еще немного")
 		else:
@@ -1321,15 +1367,81 @@ async def process_name(message: types.Message, state: FSMContext):
 		await state.finish()
 	else:
 		info = db.sender()
-		await message.answer("Начинаю рассылку...")
-		for i in range(len(info)):
+		await message.answer("Начинаю рассылку в группы, где я состою...")
+		success_count = 0
+		error_count = 0
+		skipped_count = 0
+		
+		for chat_info in info:
 			try:
-				await state.finish()
-				id = info[i][0].split('peer')[1]
-				await bot.send_message(f'-{id}', str(message.text))
+				if not chat_info or len(chat_info) == 0:
+					skipped_count += 1
+					continue
+					
+				chat_id = chat_info[0]
+				
+				# Обработка разных форматов chat_id
+				target_id = None
+				
+				# Если ID начинается с 'peer', это группа
+				if isinstance(chat_id, str) and chat_id.startswith('peer'):
+					try:
+						target_id = int(f'-{chat_id[4:]}')
+					except (ValueError, IndexError):
+						logging.error(f"Неверный формат ID группы: {chat_id}")
+						error_count += 1
+						continue
+				# Если ID отрицательное число, это также группа
+				elif isinstance(chat_id, int) and chat_id < 0:
+					target_id = chat_id
+				# Если пытаемся превратить строку в число и оно отрицательное
+				elif isinstance(chat_id, str) and chat_id.startswith('-'):
+					try:
+						target_id = int(chat_id)
+					except ValueError:
+						logging.error(f"Неверный формат ID группы: {chat_id}")
+						error_count += 1
+						continue
+				
+				# Пропускаем, если это не ID группы
+				if not target_id or target_id >= 0:
+					skipped_count += 1
+					continue
+				
+				# Проверяем, состоит ли бот в этой группе
+				try:
+					# Пробуем получить информацию о чате - если это удастся, значит бот там состоит
+					chat = await bot.get_chat(target_id)
+					
+					# Проверяем, что это группа или супергруппа
+					if chat.type in ["group", "supergroup"]:
+						await bot.send_message(target_id, message.text)
+						success_count += 1
+						logging.info(f"Сообщение отправлено в группу {chat.title} (ID: {target_id})")
+					else:
+						skipped_count += 1
+						logging.info(f"Пропускаем {target_id}: не является группой")
+				except aiogram.utils.exceptions.ChatNotFound:
+					skipped_count += 1
+					logging.info(f"Пропускаем {target_id}: бот не состоит в группе или группа не существует")
+				except aiogram.utils.exceptions.BotKicked:
+					skipped_count += 1
+					logging.info(f"Пропускаем {target_id}: бот был исключен из группы")
+				except Exception as e:
+					error_count += 1
+					logging.error(f"Ошибка при отправке в {target_id}: {str(e)}")
 			except Exception as e:
-				print(e)
-		await message.answer("Рассылка завершена.", reply_markup=keyboard.help)
+				error_count += 1
+				logging.error(f"Ошибка при обработке: {str(e)}")
+		
+		await state.finish()
+		await message.answer(
+			f"Рассылка завершена.\n"
+			f"✅ Успешно отправлено: {success_count}\n"
+			f"⏩ Пропущено: {skipped_count}\n"
+			f"❌ Ошибок: {error_count}", 
+			reply_markup=keyboard.help
+		)
 
 
 @dp.callback_query_handler()
@@ -1399,7 +1511,10 @@ async def settings_silent_on(call):
 async def quote(message: types.Message):
 	db.insert(message.chat.id)
 	if message.from_user.is_bot is False:
-		save_filename = f"quoterandom_{random.randint(1,1000000000000000000)}.png"
+		# Создаем временную директорию, если её нет
+		temp_dir = await init_temp_directories()
+		save_filename = get_temp_filename(prefix="quote", extension="png")
+		
 		if message.reply_to_message is None:
 			await message.answer("Используйте эту команду ответив на сообщение.")
 		else:
@@ -1407,15 +1522,33 @@ async def quote(message: types.Message):
 				text = ""
 			else:
 				text = message.reply_to_message.text
-			a = Quote(text, message.reply_to_message.from_user.first_name)
-			a.create(
-				"https://sun9-84.userapi.com/impf/GvKkDkADCuUzRkEglKfsMhIu_fFEwR7gra0-6A/72NHz1uPsO4.jpg?size=720x708&quality=96&sign=dabbf769d7e2086a37367d3bfeedd222&type=album",
-				result_filename=save_filename,
-				use_url=True,
-			)
-			with open(save_filename, "rb") as p:
-				await bot.send_photo(message.chat.id, p)
-				os.remove(save_filename)
+				
+			try:
+				# Создаем объект цитаты с новой библиотекой
+				quote_maker = Quote(text, message.reply_to_message.from_user.first_name)
+				
+				# Используем асинхронный метод create
+				await quote_maker.create(
+					folder_name=temp_dir,
+					avatar_name="https://sun9-84.userapi.com/impf/GvKkDkADCuUzRkEglKfsMhIu_fFEwR7gra0-6A/72NHz1uPsO4.jpg?size=720x708&quality=96&sign=dabbf769d7e2086a37367d3bfeedd222&type=album",
+					result_filename=save_filename,
+					use_url=True,
+				)
+				
+				# Полный путь к сгенерированному файлу
+				result_file = os.path.join(temp_dir, f"{save_filename}_quote.png")
+				
+				# Отправляем фото, если файл существует
+				if os.path.exists(result_file):
+					with open(result_file, "rb") as p:
+						await bot.send_photo(message.chat.id, p)
+					# Удаляем временный файл
+					os.remove(result_file)
+				else:
+					await message.reply("Не удалось создать цитату. Попробуйте еще раз.")
+			except Exception as e:
+				logging.error(f"Ошибка при создании цитаты: {e}", exc_info=True)
+				await message.reply("Произошла ошибка при создании цитаты.")
 
 
 @dp.message_handler(commands="wipe", chat_type=["group", "supergroup"])
@@ -1540,7 +1673,11 @@ async def all_message_handler(message: types.Message):
 	# Получаем параметры чата
 	can_talk = database.get("talk", 1)  # Режим разговора (1 - включен, 0 - выключен)
 	intelligent = database.get("intelligent", 0)  # Умный режим
-	speed = int(database.get("speed", 20))  # Скорость генерации сообщений
+	try:
+		speed = int(database.get("speed", 20))  # Скорость генерации сообщений
+	except (ValueError, TypeError):
+		logging.warning(f"Invalid speed value in database for chat_id {chat_id}, using default")
+		speed = 20
 	txtgen = database.get("textleft", 0)  # Счетчик сообщений
 	
 	# Обновляем счетчики текстовых сообщений
@@ -1734,44 +1871,66 @@ async def generate_random_demotivator(chat_id, texts, pictures, generator):
 			validators=[validators.words_count(minimal=1, maximal=5)]
 		)
 		
-		# Скачиваем случайное изображение
+		# Создаем временную директорию
+		temp_dir = await init_temp_directories()
+		
+		# Подготавливаем идентификаторы для файлов
 		random_picture = random.choice(pictures)
+		random_filename = get_temp_filename(prefix="input", extension="jpg")
+		result_prefix = get_temp_filename(prefix="result", extension="")
+		
+		# Скачиваем случайное изображение
 		dw = await bot.download_file_by_id(random_picture)
-		random_filename = f"randomimg_{random.randint(0, 10000000000000000000000000)}.jpg"
-		with open(random_filename, "wb") as f:
+		random_filepath = os.path.join(temp_dir, random_filename)
+		with open(random_filepath, "wb") as f:
 			f.write(dw.read())
 		
 		# Создаем демотиватор
-		dem_filename = f"result_{random.randint(0, 10000000000000000000000000)}.jpg"
-		
-		# Выбираем стиль демотиватора
 		style = random.randint(1, 2)
 		if style == 1:
 			# Демотиватор с двумя текстами
 			try:
 				dem = Demotivator(random_text.lower(), random_bottom_text.lower())
-				dem.create(
-					random_filename,
+				await dem.create(
+					folder_name=temp_dir, 
+					avatar_name=random_filename, 
+					result_filename=result_prefix,
 					watermark=bot_username,
-					result_filename=dem_filename,
-					delete_file=True,
 				)
-				with open(dem_filename, "rb") as photo:
-					await bot.send_photo(chat_id, photo)
+				
+				# Полный путь к результату
+				dem_filepath = os.path.join(temp_dir, f"{result_prefix}_dem.jpg")
+				
+				# Отправляем результат
+				if os.path.exists(dem_filepath):
+					with open(dem_filepath, "rb") as photo:
+						await bot.send_photo(chat_id, photo)
+					# Удаляем после отправки
+					os.remove(dem_filepath)
+				
 			except Exception as e:
 				logging.error(f"Ошибка при создании демотиватора: {e}")
 		else:
 			# Демотиватор с одним текстом
 			try:
 				dem = Demotivator(random_text.lower(), "")
-				dem.create(
-					random_filename,
+				await dem.create(
+					folder_name=temp_dir, 
+					avatar_name=random_filename, 
+					result_filename=result_prefix,
 					watermark=bot_username,
-					result_filename=dem_filename,
-					delete_file=True,
 				)
-				with open(dem_filename, "rb") as photo:
-					await bot.send_photo(chat_id, photo)
+				
+				# Полный путь к результату
+				dem_filepath = os.path.join(temp_dir, f"{result_prefix}_dem.jpg")
+				
+				# Отправляем результат
+				if os.path.exists(dem_filepath):
+					with open(dem_filepath, "rb") as photo:
+						await bot.send_photo(chat_id, photo)
+					# Удаляем после отправки
+					os.remove(dem_filepath)
+					
 			except Exception as e:
 				logging.error(f"Ошибка при создании демотиватора: {e}")
 	
@@ -1779,12 +1938,11 @@ async def generate_random_demotivator(chat_id, texts, pictures, generator):
 		logging.error(f"Ошибка при генерации демотиватора: {e}")
 	finally:
 		# Удаляем временные файлы
-		for filename in [dem_filename]:
-			if os.path.exists(filename):
-				try:
-					os.remove(filename)
-				except:
-					pass
+		try:
+			if os.path.exists(random_filepath):
+				os.remove(random_filepath)
+		except:
+			pass
 
 # Функция для генерации случайного опроса
 async def generate_random_poll(chat_id, generator):
@@ -1934,29 +2092,38 @@ def get_image_path(image_name):
 
 # Функция для очистки временных файлов
 def cleanup_temp_files():
-	"""
-	Очищает временные файлы, созданные ботом.
-	"""
-	temp_patterns = [
-		'randomimg_*.jpg', 
-		'result_*.jpg', 
-		'quoterandom_*.png',
-		'random_voice_*.mp3'
+	"""Удаляет временные файлы, которые могли остаться от предыдущих запусков."""
+	patterns = [
+		'random_voice_*.mp3',
+		'result_*.jpg',
+		'input_*.jpg',
+		'quote_*.png',
+		'pictext_*.png',
+		'*_dem.jpg',
+		'*_quote.png',
 	]
 	
-	# Собираем все файлы, соответствующие шаблонам
-	temp_files = []
-	for pattern in temp_patterns:
-		import glob
-		temp_files.extend(glob.glob(pattern))
-	
-	# Удаляем найденные файлы
-	for file in temp_files:
+	for pattern in patterns:
 		try:
-			os.remove(file)
-			logging.info(f"Удален временный файл: {file}")
+			for file in glob.glob(pattern):
+				try:
+					if os.path.exists(file):
+						os.remove(file)
+						logging.info(f"Deleted temp file: {file}")
+				except Exception as e:
+					logging.error(f"Failed to delete temp file {file}: {e}")
+			
+			# Также проверяем в директории временных файлов
+			temp_dir = os.path.join("app", "media", "temp")
+			for file in glob.glob(os.path.join(temp_dir, pattern)):
+				try:
+					if os.path.exists(file):
+						os.remove(file)
+						logging.info(f"Deleted temp file: {file}")
+				except Exception as e:
+					logging.error(f"Failed to delete temp file {file}: {e}")
 		except Exception as e:
-			logging.error(f"Ошибка при удалении временного файла {file}: {e}")
+			logging.error(f"Error cleaning up temp files with pattern {pattern}: {e}")
 
 # Функция для периодических задач
 async def scheduled_tasks():
@@ -2012,6 +2179,7 @@ async def on_startup(dp):
 	# Ensure all required directories exist
 	dirs_to_create = [
 		os.path.join("app", "media", "fonts"),
+		os.path.join("app", "media", "temp"),
 		os.path.join("app", "media", "demotivators", "fonts"),
 		os.path.join("app", "media", "images"),
 		os.path.join("app", "database"),
@@ -2025,6 +2193,9 @@ async def on_startup(dp):
 				logging.info(f"Created directory: {directory}")
 		except Exception as e:
 			logging.error(f"Failed to create directory {directory}: {e}")
+	
+	# Инициализируем временную директорию для новой библиотеки 
+	await init_temp_directories()
 	
 	# Ensure premium.txt exists
 	premium_file = os.path.join("app", "premium.txt")
@@ -2055,6 +2226,37 @@ async def on_startup(dp):
 	# Start scheduled tasks
 	asyncio.create_task(scheduled_tasks())
 	
+	# Register all commands with BotFather
+	commands = [
+		types.BotCommand(command="help", description="Помощь и список команд"),
+		types.BotCommand(command="info", description="Информация о боте"),
+		types.BotCommand(command="premium", description="Проверить премиум-статус чата"),
+		types.BotCommand(command="settings", description="Настройки бота"),
+		types.BotCommand(command="gen", description="Генерация случайной фразы"),
+		types.BotCommand(command="gendem", description="Генерация демотиватора"),
+		types.BotCommand(command="genmem", description="Генерация мема"),
+		types.BotCommand(command="genvoice", description="Генерация голосового сообщения"),
+		types.BotCommand(command="genanek", description="Генерация анекдота"),
+		types.BotCommand(command="gendialogue", description="Генерация диалога"),
+		types.BotCommand(command="genpoem", description="Генерация стихотворения"),
+		types.BotCommand(command="genbugurt", description="Генерация бугурта"),
+		types.BotCommand(command="gensyntax", description="Генерация с правильным синтаксисом"),
+		types.BotCommand(command="gensymbols", description="Генерация текста определенной длины"),
+		types.BotCommand(command="genlong", description="Генерация длинного текста"),
+		types.BotCommand(command="genpoll", description="Генерация опроса"),
+		types.BotCommand(command="quote", description="Создание цитаты"),
+		types.BotCommand(command="choice", description="Выбрать один из вариантов"),
+		types.BotCommand(command="cont", description="Продолжить фразу"),
+		types.BotCommand(command="wipe", description="Очистка базы данных"),
+		types.BotCommand(command="checkfonts", description="Проверка доступности шрифтов (админ)"),
+	]
+	
+	try:
+		await bot.set_my_commands(commands)
+		logging.info("Bot commands have been successfully registered with BotFather")
+	except Exception as e:
+		logging.error(f"Failed to register bot commands: {e}")
+	
 	# Get bot info and log startup
 	try:
 		bot_info = await bot.get_me()
@@ -2063,6 +2265,53 @@ async def on_startup(dp):
 		logging.info(f"Бот запущен")
 		logging.error(f"Не удалось получить информацию о боте: {e}")
 
+# Инициализировать необходимые директории
+async def init_temp_directories():
+    """
+    Создает необходимые временные директории для работы с демотиваторами, цитатами и т.п.
+    """
+    temp_dir = os.path.join("app", "media", "temp")
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir, exist_ok=True)
+    return temp_dir
+
+# Другие вспомогательные функции для работы с путями
+def get_temp_filename(prefix="temp", extension="jpg"):
+    """Создает случайное имя файла для временных изображений"""
+    random_id = random.randint(0, 10000000000000000000000000)
+    return f"{prefix}_{random_id}.{extension}"
+
+@dp.message_handler(commands="checkfonts", chat_type=["private", "group", "supergroup"])
+async def check_fonts(message: types.Message):
+	"""
+	Команда для проверки доступности шрифтов, используемых в боте.
+	Полезна для диагностики проблем с генерацией изображений.
+	"""
+	if message.from_user.id != admin:
+		await message.reply("Эта команда доступна только администратору.")
+		return
+	
+	font_paths = [
+		os.path.join(os.path.dirname(os.path.dirname(__file__)), "simpledemotivators_2_0", "Formular-BlackItalic.ttf"),
+		os.path.join(os.path.dirname(os.path.dirname(__file__)), "simpledemotivators_2_0", "Formular-Italic.ttf"),
+		os.path.join(os.path.dirname(os.path.dirname(__file__)), "simpledemotivators_2_0", "Impact.ttf")
+	]
+	
+	results = []
+	for path in font_paths:
+		if os.path.exists(path):
+			results.append(f"✅ {os.path.basename(path)} - найден")
+		else:
+			results.append(f"❌ {os.path.basename(path)} - НЕ найден")
+	
+	# Проверка доступа к директории временных файлов
+	temp_dir = os.path.join("app", "media", "temp")
+	if os.path.exists(temp_dir) and os.access(temp_dir, os.W_OK):
+		results.append(f"✅ Директория для временных файлов доступна для записи: {temp_dir}")
+	else:
+		results.append(f"❌ Проблема с доступом к директории для временных файлов: {temp_dir}")
+	
+	await message.reply("\n".join(results))
 
 # Запуск бота
 if __name__ == "__main__":
