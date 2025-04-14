@@ -21,7 +21,7 @@ gtts>=2.2.3
 requests>=2.27.1
 websocket-client>=1.6.0
 python-socketio>=5.7.0
-aiohttp>=3.8.0
+aiohttp>=3.8.0,<3.9.0  # Limit to version compatible with aiogram
 
 # Image processing
 pillow>=9.0.0
@@ -38,3 +38,6 @@ pytest-cov>=4.0.0
 black>=22.0.0
 flake8>=5.0.0
 isort>=5.10.0
+
+# Dependencies with specific version requirements
+certifi>=2022.5.18,<2023.0.0  # Required by aiopayok
