@@ -1,42 +1,40 @@
-# Core dependencies
-python-telegram-bot==13.15
-SQLAlchemy==2.0.23
-alembic==1.12.1
-psycopg2-binary==2.9.9
-python-dotenv==1.0.0
-
-# Optimization and monitoring
-matplotlib
-numpy
-pandas==2.1.3
-tabulate==0.9.0
-tqdm==4.66.1
-
-# Testing and development
-pytest==7.4.3
-pytest-cov==4.1.0
-black==23.11.0
-flake8==6.1.0
-isort==5.12.0
-
-# Бот и API интеграции
-aiogram>=2.20.0
+# Core Telegram Bot and Database
+aiogram>=2.20.0,<3.0.0
 aioschedule>=0.5.2
 aiopayok>=0.2.1
+SQLAlchemy>=1.4.0,<3.0.0
+alembic>=1.8.0,<2.0.0
+python-dotenv>=0.19.0
+
+# Data processing and visualization
+numpy>=1.20.0,<2.0.0
+pandas>=1.3.0,<2.1.0  # Keep below 2.1.0 for Python 3.8 compatibility
+matplotlib>=3.4.0
+tabulate>=0.8.0
+tqdm>=4.60.0
+
+# Text and language processing
 translatepy>=2.3
-pillow>=9.0.0
 gtts>=2.2.3
+
+# Network and API
 requests>=2.27.1
-websocket-client>=1.6.4
-python-socketio>=5.11.1
+websocket-client>=1.6.0
+python-socketio>=5.7.0
+aiohttp>=3.8.0
 
-# Асинхронная работа с файлами
-asyncio
-aiofiles
-asyncssh
-aiohttp
+# Image processing
+pillow>=9.0.0
+opencv-python-headless>=4.5.0  # Headless version for server deployments
 
-# Изображения
-opencv-python
-pyffmpeg
-aiofiles
+# File handling
+asyncio>=3.4.3
+aiofiles>=0.8.0
+asyncssh>=2.12.0
+
+# For testing and development (optional)
+pytest>=7.0.0
+pytest-cov>=4.0.0
+black>=22.0.0
+flake8>=5.0.0
+isort>=5.10.0
